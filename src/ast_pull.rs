@@ -1167,7 +1167,7 @@ pub fn list<'a, 'b>(input: &'a str, ctx: &mut Context<'a, 'b>) -> IResult<&'a st
 
 pub fn special_stmt_front<'a, 'b>(input: &'a str, ctx: &mut Context<'a, 'b>) -> IResult<&'a str, Stream<'a>> {
     map!(input,
-        alt_complete!(apply!(headers, ctx) | apply!(desc_list, ctx) | apply!(list, ctx) | apply!(block_quote, ctx) | block_code | horizontal_rule),
+        alt_complete!(apply!(headers, ctx) | apply!(desc_list, ctx) | apply!(list, ctx) | apply!(block_quote, ctx) | block_code | image | horizontal_rule),
         |mut res: Stream<'a>| {
             if ctx.stack.last() == Some(&Tag::Paragraph) {
                 ctx.stack.pop();
