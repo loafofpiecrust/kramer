@@ -1,0 +1,29 @@
+[package]
+name = "kramer"
+version = "0.1.0"
+authors = ["Taylor Snead <taylorsnead@gmail.com>"]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "kramer"
+path = "src/main.rs"
+
+[dependencies]
+itertools = "*"
+serde = "1.0.2"
+serde_derive = "*"
+
+[dependencies.nom]
+version = "*"
+features = ["verbose-errors"]
+
+[dependencies.clap]
+version = "*"
+
+[dependencies.serde_yaml]
+git = "https://github.com/dtolnay/serde-yaml"
+
+[dependencies.serde_json]
+git = "https://github.com/serde-rs/json"

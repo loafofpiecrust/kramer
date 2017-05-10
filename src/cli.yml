@@ -1,0 +1,13 @@
+name: kramer
+version: "1.0"
+author: loafofpiecrust
+about: Similar to Markdown
+args:
+  - input:
+      index: 1
+      help: the input file/folder to build a book from
+      default_value: .
+  - config:
+      short: c
+      long: config
+      takes_value: true
