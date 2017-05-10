@@ -1,6 +1,6 @@
 [package]
 name = "kramer"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Taylor Snead <taylorsnead@gmail.com>"]
 
 [lib]
