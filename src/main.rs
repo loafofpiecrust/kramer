@@ -69,8 +69,43 @@ fn main() {
     // Required parameter, so can unwrap.
     let inp = matches.value_of("input").unwrap_or(".");
 
-    let book = book::build(inp, &cfg).unwrap();
-    println!("{:?}", book);
+    let mut file = File::open(inp).unwrap();
+    let mut raw = String::new();
+    file.read_to_string(&mut raw);
+
+    println!("{:?}", ast_pull::document(&raw, &ast_pull::Config::default()).map(|d| d.to_html(&ast_pull::Config::default())));
+
     //book.unwrap().to_html(Path::new("test/book-out"), &cfg).unwrap();
 
 }
+//
+// use kramer::*;
+//
+// fn main() {
+//     println!("{:?}", adoc::lexer::nonempty_line("Shallots"));
+//     println!("{:?}", adoc::lexer::paragraphs(
+//     r#"
+//     Hello my name is
+//     Yolo
+//
+//     Shallots
+//
+//     [cmd]
+//     --
+//     Some block
+//     of shit
+//     --
+//
+//     "#));
+//     println!("{:?}", adoc::lexer::elements(r#"
+// I'm a paragraph.
+//
+// [quote]
+// --
+// I'm a block yo catch it.
+// Multiple lines yo
+//
+// More
+// --
+//     "#));
+// }

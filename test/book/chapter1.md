@@ -1,6 +1,9 @@
 
 
-
+[quote]
+--
+Some big deal hot-shot son of a bitch...
+--
 
 ```bash
 $ mdbook test

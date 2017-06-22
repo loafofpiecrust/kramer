@@ -15,13 +15,4 @@ hi ~~~~triple~~~~
 
 another th\~{o}ng
 34/100 +- 1/100
-^I'm saying^--well, I _was_ saying: "All ya need is love! Ba ba da da da!"
-
-> > > triplet
-> > > still triple
-> blockquote
-
-
-> singular
-> > nested
-> > double shit yo
+ ^I'm saying^--well, I _was_ saying: "All ya need is love! Ba ba da da da!"

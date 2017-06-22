@@ -131,6 +131,22 @@ impl<'a> Event<'a> {
         }
     }
 
+    fn to_text(&self, out: &mut Write) -> fmt::Result {
+        use self::Event::*;
+        match *self {
+            Text(s) => write!(out, "{}", s),
+            String(ref s) => write!(out, "{}", s),
+            LineBreak => write!(out, "\n"),
+            Span(ref evts) => {
+                for e in evts {
+                    e.to_text(out)?;
+                }
+                Ok(())
+            },
+            _ => Ok(())
+        }
+    }
+
     fn to_html_help(&self, out: &mut Write, cfg: &Config, stack: &mut Vec<Event<'a>>) -> fmt::Result {
         use self::Event::*;
         match *self {
@@ -201,7 +217,7 @@ impl<'a> Event<'a> {
 
 pub type Stream<'a> = VecDeque<Event<'a>>;
 pub type Stack<'a> = Vec<Tag<'a>>;
-pub type SpanCmd<'a, 'b> = fn(&'a str, Context<'a, 'b>) -> Option<Stream<'a>>;
+pub type SpanCmd<'a, 'b> = fn(&'a str, Context<'a, 'b>) -> IResult<&'a str, Stream<'a>>;
 type Parser<'a, 'b> = fn(&'a str, &mut Context<'a, 'b>) -> IResult<&'a str, Stream<'a>>;
 
 #[derive(Debug, Clone)]
@@ -337,14 +353,18 @@ stream!(escape_code<'a>,
 );
 
 fn eol_or_eof(input: &str) -> IResult<&str, &str> {
-    if input.is_empty() {
-        IResult::Done(input, "")
-    } else if input.starts_with('\n') {
+    if input.starts_with('\n') {
         IResult::Done(&input[1..], "\n")
+    } else if input.trim_left().is_empty() {
+        IResult::Done(input, "")
     } else {
         IResult::Incomplete(Needed::Size(1))
     }
 }
+
+named!(empty_line(&str) -> &str,
+    recognize!(terminated!(opt!(space), complete!(eol_or_eof)))
+);
 
 fn word<'a>(input: &'a str) -> IResult<&'a str, Stream<'a>> {
     alt_complete!(input,
@@ -619,6 +639,8 @@ stream_ctx!(smallcaps<'a>(ctx),
         apply!(wrapped_span, ctx, Tag::Custom("span"), " ^", "^ "),
         |mut res: Stream<'a>| {
             res.push_front(Event::Attributes(Some("css"), vec![("font-variant", Cow::Borrowed("small-caps"))]));
+            res.push_front(Event::Text(" "));
+            res.push_back(Event::Text(" "));
             res
         }
     )
@@ -727,7 +749,7 @@ named!(newlines(&str) -> &str,
 
 pub fn paragraph<'a, 'b>(input: &'a str, ctx: &mut Context<'a, 'b>) -> IResult<&'a str, Stream<'a>> {
     ctx.stack.push(Tag::Paragraph);
-    let res = separated_nonempty_list!(input, one_newline, alt_complete!(apply!(special_stmt, ctx) | apply!(span, ctx)))
+    let res = separated_nonempty_list!(input, one_newline, alt_complete!(apply!(special_stmt_front, ctx) | apply!(span, ctx)))
         .map(|spans| {
             let mut s: Stream = spans.into_iter().flat_map(|mut x| {
                 x.push_back(Event::LineBreak);
@@ -752,7 +774,13 @@ fn header<'a, 'b>(input: &'a str, ctx: &mut Context<'a, 'b>) -> IResult<&'a str,
         ),
         |(mut s, rank): (Stream<'a>, usize)| {
             let tag = Tag::Header(rank as u32);
+            let mut text = String::new();
+            Event::Span(s.clone()).to_text(&mut text);
+            text = text.to_lowercase().replace(|c: char| {
+                return !(c.is_alphanumeric() || c == ' ');
+            }, "").split_whitespace().join("-");
             s.push_front(Event::Start(tag));
+            s.push_front(Event::Attributes(None, vec![("id", Cow::Owned(text))]));
             s.push_back(Event::End(tag));
             s
         }
@@ -766,7 +794,7 @@ stream_ctx!(headers<'a>(ctx),
         |hs: Vec<Stream<'a>>| {
             let h_count = hs.len();
             let mut res: Stream = hs.into_iter().flatten().collect();
-            let rank = match res.front().unwrap() {
+            let rank = match res.iter().nth(1).unwrap() {
                 &Event::Start(Tag::Header(rank)) => rank,
                 _ => unreachable!(), // must be a header, otherwise wouldn't get here.
             };
@@ -860,6 +888,30 @@ stream!(image<'a>,
     })
 );
 
+stream_ctx!(block_command<'a>(ctx),
+    map_opt!(do_parse!(
+        tag!("[") >>
+        cmd_name: alphanumeric >> // TODO: Add arguments
+        tag!("]") >> empty_line >>
+        tag!("--") >> // TODO: More block types to accept commands.
+        // Check for all block types. If something non-negotiable is used, override the given cmd with that one.
+        content: take_until_and_consume_s!("\n--") >>
+        (cmd_name, content)
+    ), |(cmd, rem)| {
+        println!("trying to call cmd '{}' with '{}'", cmd, rem);
+        match ctx.span_cmds.get(cmd) {
+            Some(cmd) => match (cmd)(rem, ctx.clone()) {
+                IResult::Done(_, res) => Some(res),
+                _ => None
+            },
+            None => match special_stmt_front(rem, &mut ctx.clone()) {
+                IResult::Done(_, res) => Some(res),
+                _ => None
+            }
+        }
+    })
+);
+
 stream_ctx!(command<'a>(ctx),
     map_opt!(do_parse!(
         tag!("!") >>
@@ -869,8 +921,12 @@ stream_ctx!(command<'a>(ctx),
         tag!("]") >>
         (cmd_to_call, content)
     ), |(c, content)| {
+        println!("trying to call cmd '{}'", c);
         match ctx.span_cmds.get(c) {
-            Some(cmd) => (cmd)(content, ctx.clone()),
+            Some(cmd) => match (cmd)(content, ctx.clone()) {
+                IResult::Done(_, res) => Some(res),
+                _ => None
+            },
             None => match span(content, &mut ctx.clone()) {
                 IResult::Done(_, mut res) => {
                     res.push_front(Event::Start(Tag::Custom(c)));
@@ -1167,7 +1223,7 @@ pub fn list<'a, 'b>(input: &'a str, ctx: &mut Context<'a, 'b>) -> IResult<&'a st
 
 pub fn special_stmt_front<'a, 'b>(input: &'a str, ctx: &mut Context<'a, 'b>) -> IResult<&'a str, Stream<'a>> {
     map!(input,
-        alt_complete!(apply!(headers, ctx) | apply!(desc_list, ctx) | apply!(list, ctx) | apply!(block_quote, ctx) | block_code | image | horizontal_rule),
+        alt_complete!(apply!(block_command, ctx) | apply!(headers, ctx) | apply!(desc_list, ctx) | apply!(list, ctx) | apply!(block_quote, ctx) | block_code | image | horizontal_rule),
         |mut res: Stream<'a>| {
             if ctx.stack.last() == Some(&Tag::Paragraph) {
                 ctx.stack.pop();
@@ -1191,8 +1247,20 @@ stream_ctx!(special_stmt<'a>(ctx),
 );
 
 pub fn statement<'a, 'b>(input: &'a str, ctx: &mut Context<'a, 'b>) -> IResult<&'a str, Stream<'a>> {
-    alt_complete!(input, apply!(special_stmt, ctx) | apply!(paragraph, ctx))
+    alt_complete!(input, apply!(special_stmt_front, ctx) | apply!(paragraph, ctx))
 }
+
+stream_ctx!(block<'a>(ctx),
+    map!(delimited!(
+        whitespace,
+        // separated_list!(whitespace, complete!(apply!(statement, ctx))),
+        apply!(span, ctx),
+        whitespace
+    ), |stmts: Stream<'a>| {
+        // stmts.into_iter().flatten().collect()
+        stmts
+    })
+);
 
 stream!(front_matter<'a>,
     map_opt!(delimited!(
@@ -1213,9 +1281,15 @@ fn document_help<'a, 'b>(input: &'a str, cfg: &Config<'b>) -> IResult<&'a str, E
     let mut ctx = Context::new(cfg.clone());
 
     ctx.span_cmds.insert("lit", |input: &'a str, ctx: Context| {
-        let mut res = Stream::new();
-        res.push_back(Event::Text(input));
-        Some(res)
+        IResult::Done("", Stream::from_elem(Event::Text(input)))
+    });
+
+    ctx.span_cmds.insert("quote", |input, mut ctx| {
+        println!("block quote cmd with '{}'", input);
+        let (rem, mut res) = try_parse!(input, apply!(block, &mut ctx));
+        res.push_front(Event::Start(Tag::BlockQuote(0)));
+        res.push_back(Event::End(Tag::BlockQuote(0)));
+        IResult::Done(rem, res)
     });
 
     let (rem, _) = try_parse!(input, opt!(multispace));
@@ -1229,9 +1303,6 @@ fn document_help<'a, 'b>(input: &'a str, cfg: &Config<'b>) -> IResult<&'a str, E
         res.push_back(Event::End(unclosed));
     }
     res.push_front(Event::Start(Tag::Document));
-    res.push_back(Event::Attributes(None, vec![("class", Cow::Borrowed("document-end"))]));
-    res.push_back(Event::Start(Tag::Custom("div")));
-    res.push_back(Event::End(Tag::Custom("div")));
     res.push_back(Event::End(Tag::Document));
     if let Some(fm) = fm {
         for e in fm.into_iter().rev() {

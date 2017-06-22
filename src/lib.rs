@@ -25,5 +25,6 @@ extern crate serde_yaml;
 //mod grammar;
 //mod parse;
 pub mod book;
-//mod ast_new;
+// mod ast_new;
 pub mod ast_pull;
+pub mod adoc;
